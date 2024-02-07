@@ -113,9 +113,9 @@ According to the online information and the printed information above, it can be
 memory_base <- object_size(df_base)
 memory_tidyverse <- object_size(df_tidyverse)
 memory_datatable <- object_size(df_datatable)
-cat("Memory used by df_base (read.csv):",memory_base)
-cat("Memory used by df_tidyverse (read_csv):",memory_tidyverse)
-cat("Memory used by df_datatable (fread):",memory_datatable)
+cat("Memory used by df_base(read.csv):",memory_base)
+cat("Memory used by df_tidyverse(read_csv):",memory_tidyverse)
+cat("Memory used by df_datatable(fread):",memory_datatable)
 ```
 
 
