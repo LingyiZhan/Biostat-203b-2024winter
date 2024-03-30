@@ -47,7 +47,7 @@ In this exercise, we use tidyverse (ggplot2, dplyr, etc) to explore the MIMIC-IV
 
 ## Q1. Visualizing patient trajectory
 Visualizing a patient’s encounters in a health care system is a common task in clinical data analysis. In this question, we will visualize a patient’s ADT (admission-discharge-transfer) history and ICU vitals in the MIMIC-IV data.
-# Q1.1 ADT history
+### Q1.1 ADT history
 A patient’s ADT history records the time of admission, discharge, and transfer in the hospital. This figure shows the ADT history of the patient with `subject_id` 10001217 in the MIMIC-IV data. The x-axis is the calendar time, and the y-axis is the type of event (ADT, lab, procedure). The color of the line segment represents the care unit. The size of the line segment represents whether the care unit is an ICU/CCU. The crosses represent lab events, and the shape of the dots represents the type of procedure. The title of the figure shows the patient’s demographic information and the subtitle shows top 3 diagnoses.
 
 Do a similar visualization for the patient with `subject_id` 10013310 using ggplot.
@@ -126,7 +126,7 @@ print(p)
 
 
 
-# Q1.2 ICU stays
+### Q1.2 ICU stays
 ICU stays are a subset of ADT history. This figure shows the vitals of the patient `10001217` during ICU stays. The x-axis is the calendar time, and the y-axis is the value of the vital. The color of the line represents the type of vital. The facet grid shows the abbreviation of the vital and the stay ID.
 
 Do a similar visualization for the patient 10013310.
@@ -189,14 +189,14 @@ The first 10 lines are
 zcat < ~/mimic/icu/icustays.csv.gz | head
 ```
 
-# Q2.1 Ingestion
+### Q2.1 Ingestion
 Import `icustays.csv.gz` as a tibble `icustays_tble`.
 ```{r}
 icustays_tble <- read_csv("~/mimic/icu/icustays.csv.gz")
 ```
 
 
-# Q2.2 Summary and visualization
+### Q2.2 Summary and visualization
 ```{r}
 # Count unique subject_ids
 num_unique_subjects <- icustays_tble %>%
@@ -235,7 +235,7 @@ The third block creates a histogram visualizing how many subjects have different
 The last block counts how many subjects had more than one ICU stay. 
 **As a result, a `subject_id` can have multiple ICU stays.**
 
-# Q3. `admissions` data
+## Q3. `admissions` data
 Information of the patients admitted into hospital is available in admissions.csv.gz. 
 See https://mimic.mit.edu/docs/iv/modules/hosp/admissions/ for details of each field in this file. 
 The first 10 lines are:
@@ -243,14 +243,14 @@ The first 10 lines are:
 zcat < ~/mimic/hosp/admissions.csv.gz | head
 ```
 
-## Q3.1 Ingestion
+### Q3.1 Ingestion
 Import `admissions.csv.gz` as a tibble `admissions_tble`.
 
 ```{r}
 admissions_tble <- read_csv("~/mimic/hosp/admissions.csv.gz")
 ```
 
-## Q3.2 Summary and visualization
+### Q3.2 Summary and visualization
 Summarize the following information by graphics and explain any patterns you see.
 
 * number of admissions per patient
@@ -329,13 +329,13 @@ Patient information is available in `patients.csv.gz`. See https://mimic.mit.edu
 ```{bash}
 zcat < ~/mimic/hosp/patients.csv.gz | head
 ```
-# Q4.1 Ingestion
+### Q4.1 Ingestion
 Import `patients.csv.gz` (https://mimic.mit.edu/docs/iv/modules/hosp/patients/) as a tibble `patients_tble`.
 
 ```{r}
 patients_tble <- read_csv("~/mimic/hosp/patients.csv.gz")
 ```
-# Q4.2 Summary and visualization
+### Q4.2 Summary and visualization
 ```{r}
 # Visualization for Gender Distribution
 ggplot(patients_tble, aes(x=gender)) +
@@ -519,7 +519,7 @@ final_mimic_icu_cohort <- icu_adults_lab %>%
 
 print(final_mimic_icu_cohort)
 ```
-# Q8. Exploratory data analysis (EDA)
+## Q8. Exploratory data analysis (EDA)
 Summarize the following information about the ICU stay cohort `mimic_icu_cohort` using appropriate numerics or graphs:
 
 Length of `ICU` stay los vs demographic variables (race, insurance, marital_status, gender, age at intime)
