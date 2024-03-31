@@ -1,0 +1,308 @@
+---
+title: "Biostat 203B Homework 5"
+subtitle: "Due Mar 22 @ 11:59PM"
+author: "Lingyi Zhang and 606332255"
+format:
+  html:
+    theme: cosmo
+    embed-resources: true
+    number-sections: false
+    toc: true
+    toc-depth: 4
+    toc-location: left
+    code-fold: false
+execute:
+  eval: true
+---
+
+Display machine information:
+```{r}
+sessionInfo()
+```
+Display my machine memory.
+```{r}
+memuse::Sys.meminfo()
+```
+
+## Predicting ICU duration
+
+Using the ICU cohort `mimiciv_icu_cohort.rds` you built in Homework 4, develop at least three machine learning approaches (logistic regression with enet regularization, random forest, boosting, SVM, MLP, etc) plus a model stacking approach for predicting whether a patient's ICU stay will be longer than 2 days. You should use the `los_long` variable as the outcome. You algorithms can use patient demographic information (gender, age at ICU `intime`, marital status, race), ICU admission information (first care unit), the last lab measurements before the ICU stay, and first vital measurements during ICU stay as features. You are welcome to use any feature engineering techniques you think are appropriate; but make sure to not use features that are not available at an ICU stay's `intime`. For instance, `last_careunit` cannot be used in your algorithms. 
+
+1. Data preprocessing and feature engineering.
+
+2. Partition data into 50% training set and 50% test set. Stratify partitioning according to `los_long`. For grading purpose, sort the data by `subject_id`, `hadm_id`, and `stay_id` and use the seed `203` for the initial data split. Below is the sample code.
+
+Import pakcages:
+```{r}
+library(tidymodels)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(ROSE)
+library(mice)
+library(fastDummies)
+library(lubridate)
+library(randomForest)
+library(e1071)
+library(xgboost)
+library(ROCR)
+library(caret)
+library(shapr)
+library(kableExtra)
+```
+
+```{r}
+set.seed(203) # random seed
+
+# read rds data
+mimiciv_icu_cohort <- readRDS('mimic_icu_cohort.rds')$inputs$data
+
+# sort
+mimiciv_icu_cohort <- mimiciv_icu_cohort |>
+  arrange(subject_id, hadm_id, stay_id)
+```
+### Feature engineering
+#### select columns with useful data
+```{r}
+##### Feature engineering
+str(mimiciv_icu_cohort)
+
+# Transform Type
+numeric_vars <- c("creatinine", "potassium", "sodium", "chloride", "bicarbonate",
+                  "hematocrit", "white_blood_cell_count", "glucose",
+                  "heartrate", "systolic_non_invasive_blood_pressure", 
+                  "diastolic_non_invasive_blood_pressure", "temperature_Fahrenheit", 
+                  "respiratory_rate")
+mimiciv_icu_cohort[numeric_vars] <- lapply(mimiciv_icu_cohort[numeric_vars], function(x) as.numeric(as.character(x)))
+
+# check NA
+na_counts <- mimiciv_icu_cohort %>%
+  summarise(across(everything(), ~sum(is.na(.))))
+print(width=Inf, na_counts)
+
+# select useful cols
+# no glucose potassium sodium because too much data is missing.
+cols <- c("intime","outtime","los","admittime","dischtime","admission_type","insurance","language","marital_status","race","hospital_expire_flag","gender",
+"anchor_age","anchor_year","creatinine","chloride", "bicarbonate","hematocrit", "white_blood_cell_count","heartrate", "systolic_non_invasive_blood_pressure", "diastolic_non_invasive_blood_pressure", "temperature_Fahrenheit", "respiratory_rate","los_long")
+
+mimiciv_icu_cohort <- mimiciv_icu_cohort %>% select(all_of(cols))
+
+# see data distribution(other is the same)
+ggplot(mimiciv_icu_cohort, aes(x = creatinine)) +
+  geom_histogram(binwidth = 0.1, fill = "skyblue", color = "black") +
+  theme_minimal() +
+  ggtitle("Creatinine Distribution") +
+  xlab("Creatinine") +
+  ylab("Frequency")
+```
+#### Deal with time, Calculate the time difference
+```{r}
+mimiciv_icu_cohort <- mimiciv_icu_cohort %>%
+  mutate(
+    los_minutes = as.numeric(difftime(outtime, intime, units = "mins")),
+    process_minutes = as.numeric(difftime(dischtime, admittime, units = "mins"))
+  ) %>%
+  select(-intime, -outtime, -admittime, -dischtime)
+```
+
+#### impute data with NA
+
+```{r}
+imputed_data <- mimiciv_icu_cohort
+# Deal with NA use Multiple interpolation
+continuous_vars <- select_if(imputed_data, is.numeric)
+categorical_vars <- select_if(imputed_data, function(x) is.factor(x) | is.character(x))
+# Continuous variables: Fill missing values with the median
+for (var in names(continuous_vars)) {
+  imputed_data[[var]] <- ifelse(is.na(imputed_data[[var]]), 
+                      median(imputed_data[[var]], na.rm = TRUE), 
+                      imputed_data[[var]])
+}
+# Categorical variable: Fill missing values with mode
+for (var in names(categorical_vars)) {
+  mode_value <- names(sort(table(imputed_data[[var]]), decreasing = TRUE))[1]
+  imputed_data[[var]] <- ifelse(is.na(imputed_data[[var]]), 
+                      as.character(mode_value), 
+                      imputed_data[[var]])
+}
+# check NA
+na_counts <- imputed_data %>%
+  summarise(across(everything(), ~sum(is.na(.))))
+print(width=Inf, na_counts)
+str(imputed_data)
+```
+#### Preprocess data
+```{r}
+# Normalization Min-max
+num_vars <- c("los", "anchor_age","anchor_year","creatinine", "chloride", "bicarbonate", "hematocrit", "white_blood_cell_count", "heartrate","systolic_non_invasive_blood_pressure","diastolic_non_invasive_blood_pressure","temperature_Fahrenheit","respiratory_rate","los_minutes","process_minutes")
+data_norm <- imputed_data %>%
+  mutate_at(vars(num_vars), ~(. - min(.)) / (max(.) - min(.)))
+
+# one-hot
+data_onehot <- fastDummies::dummy_cols(data_norm, select_columns = c("admission_type","language","insurance", "marital_status", "race", "hospital_expire_flag","gender"),remove_selected_columns=TRUE)
+
+```
+#### Split data to train and test
+```{r}
+data_split <- initial_split(
+  data_onehot, 
+  strata = "los_long", 
+  prop = 0.5
+  )
+
+train_set <- training(data_split)
+train_set$los_long <- as.factor(train_set$los_long)
+test_set <- testing(data_split)
+test_set$los_long <- as.factor(test_set$los_long)
+```
+
+3. Train and tune the models using the training set.
+### Training Models and test
+#### Random Forest Train
+```{r}
+rf_train_st <- Sys.time()
+
+# train
+train_x <- train_set %>% select(-los_long)
+train_y <- train_set$los_long
+rf_model <- randomForest(x = train_x, y = train_y, ntree = 100)
+
+rf_train_et <- Sys.time()
+
+rf_train_time <- rf_train_et - rf_train_st
+
+cat("Random Forest Train Time Usage: ", rf_train_time, "\n")
+```
+#### Random Forest Test
+```{r}
+test_x <- test_set %>% select(-los_long)
+test_y <- test_set$los_long
+rf_pred <- predict(rf_model, newdata = test_x, type = "response")
+rf_pred_prob <- predict(rf_model, newdata = test_x, type = "prob")
+
+pred <- prediction(predictions = rf_pred_prob[,2], labels = test_y)
+perf <- performance(pred, "auc")
+rf_auc <- perf@y.values[[1]]
+cat("Random Forest Area Under ROC Curve (AUC): ", rf_auc, "\n")
+rf_accuracy <- mean(rf_pred == test_y)
+cat("Random Forest Accuracy: ", rf_accuracy, "\n")
+```
+
+#### Support Vector Machine (SVM) 
+```{r}
+svm_train_st <- Sys.time()
+
+svm_model <- svm(los_long ~ ., data = train_set, kernel = "radial",probability = TRUE)
+
+svm_train_et <- Sys.time()
+
+svm_train_time = svm_train_et - svm_train_st
+cat("SVM Train Time Usage: ", svm_train_time, "\n")
+```
+```{r}
+svm_pred_prob <- predict(svm_model, newdata = test_x, probability = TRUE)
+svm_pred_classes <- predict(svm_model, newdata = test_x, probability = FALSE)
+svm_pred_classes <- as.numeric(svm_pred_classes) -1 
+svm_pred_probabilities <- attr(svm_pred_prob, "probabilities")[,2]
+
+pred <- prediction(svm_pred_probabilities, test_y)
+perf <- performance(pred, measure = "auc")
+svm_auc <- as.numeric(perf@y.values)
+cat("SVM Area Under ROC Curve (AUC): ", svm_auc, "\n")
+
+svm_accuracy <- mean(svm_pred_classes == test_y)
+cat("SVM Accuracy: ", svm_accuracy, "\n")
+
+```
+
+#### Boosting
+```{r}
+train_y <- as.numeric(train_set$los_long) - 1  
+train_x <- as.matrix(train_set[, !names(train_set) %in% "los_long"])
+
+test_y <- as.numeric(test_set$los_long) - 1
+test_x <- as.matrix(test_set[, !names(test_set) %in% "los_long"])
+
+dtrain <- xgb.DMatrix(data = train_x, label = train_y)
+dtest <- xgb.DMatrix(data = test_x, label = test_y)
+num_class <- length(levels(factor(train_set$los_long)))
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "logloss",  
+  max_depth = 6,
+  eta = 0.3
+)
+
+boost_train_st <- Sys.time()
+
+xgb_model <- xgboost(
+  params = params,
+  data = dtrain,
+  nrounds = 100,
+  verbose = 0,
+  nthread = 2,
+  early_stopping_rounds = 10,
+)
+
+boost_train_et <- Sys.time()
+
+boost_train_time <-  boost_train_et - boost_train_st
+cat("Boosting Train Time Usage: ", boost_train_time, "\n")
+
+```
+
+
+
+```{r}
+preds <- predict(xgb_model, dtest)
+pred <- prediction(preds, test_y)
+
+perf <- performance(pred, "auc")
+boost_auc <- as.numeric(perf@y.values)
+
+predicted_classes <- ifelse(preds > 0.5, 1, 0)
+conf_matrix <- confusionMatrix(factor(predicted_classes), factor(test_y))
+boost_accuracy <- conf_matrix$overall['Accuracy']
+
+cat("Boosting Area Under ROC Curve (AUC):", boost_auc, "\n")
+cat("Boosting Accuracy:", boost_accuracy, "\n")
+
+
+```
+
+4. Compare model classification performance on the test set. Report both the area under ROC curve and accuracy for each machine learning algorithm and the model stacking. Interpret the results. What are the most important features in predicting long ICU stays? How do the models compare in terms of performance and interpretability?
+
+### Performance
+```{r}
+rf_train_time <- as.numeric(rf_train_time)
+svm_train_time <- as.numeric(svm_train_time)
+boost_train_time <- as.numeric(boost_train_time)
+
+model_data <- data.frame(
+  Model = c("Boost", "SVM", "Random Forest"),
+  Accuracy = c(boost_accuracy, svm_accuracy, rf_accuracy),
+  AUC = c(boost_auc, svm_auc, rf_auc),
+  TrainTime = c(boost_train_time, svm_train_time, rf_train_time)
+)
+
+kable(model_data, caption = "Model Performance and Training Time Comparison", align = 'c')
+
+```
+
+* The performance of Random Forest is similar to that of Boost, but with longer training time.
+
+* Although SVM has slightly lower accuracy and AUC compared to Boost and Random Forest, it still demonstrates extremely high classification performance. 
+
+* The Boost model performs the best among these three models, achieving perfect scores not only in accuracy and AUC but also with the shortest training time. This makes the Boost model excel in both efficiency and performance. 
+
+####  View feature contributions using random forest
+```{r}
+importance(rf_model)
+varImpPlot(rf_model)
+```
+* The most important three features for predicting long-term ICU stay are los_minutes, los, and process_minutes. Los_minutes and process_minutes are calculated through feature engineering based on the difference in hospital discharge times, and they have a strong correlation with the label.
+
+* For Model interpretability: Random Forest and tree-based Boost models are relatively good in terms of interpretability, as they can provide intuitive information about feature importance. 
+
+* SVM models may be slightly less interpretable, especially when using non-linear kernel functions, because their decision boundaries are difficult to intuitively understand in high-dimensional space.
