@@ -219,7 +219,7 @@ if (!dir.exists("mimiciv_shiny")) {
   dir.create("mimiciv_shiny")
 }
 # save the final tibble
-mimic_icu_cohort |>
+processed_data |>
   write_rds("mimiciv_shiny/mimic_icu_cohort.rds", compress = "gz")
 ```
 Close database connection and clear workspace.
