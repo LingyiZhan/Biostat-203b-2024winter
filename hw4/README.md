@@ -1,1 +1,1 @@
-Bigrquery is used to obtain dataset. Please put biostat-203b-2024-winter-313290ce47a6.json here for shiny app reproduce.
+Bigrquery is used to obtain dataset. Please put biostat-203b-2024-winter-313290ce47a6.json here for quato render reproduce.
